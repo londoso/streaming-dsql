@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  streaming-dsql
+
+  Sample SAM Template for streaming-dsql
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 5
+    MemorySize: 128
+    Runtime: python3.12
+    Layers:
+      - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPythonV3-python312-x86_64:7
+
+Parameters:
+  ClusterId:
+    Description: Aurora DSQL Cluster Id
+    Type: String
+    Default: siabt3etsijuyijmtlu2nw6scy
+  BucketName:
+    Type: String
+    Description: Nombre del bucket de S3
+    Default: streaming-dsql-data-bucket-londoso
+
+Resources:
+  StreamingFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: lambdas/streaming_dsql/
+      Handler: app.lambda_handler
+      Architectures:
+        - x86_64
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: DsqlDataAccess
+              Effect: Allow
+              Action:
+                - dsql:DbConnectAdmin
+              Resource: 
+                - !Sub arn:aws:dsql:${AWS::Region}:${AWS::AccountId}:cluster/${ClusterId}
+            - Sid: S3GetObject
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: 
+                - !Sub arn:aws:s3:::${Bucket}/*
+      Events:
+        S3EventBridgeRule:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.s3
+              detail-type:
+                - "Object Created"
+              detail:
+                bucket:
+                  name:
+                    - !Ref Bucket
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: StreamingDsql
+          POWERTOOLS_METRICS_NAMESPACE: Powertools
+          LOG_LEVEL: INFO
+          REGION: !Ref AWS::Region
+          DSQL_CLUSTER_ENDPOINT : !Sub "${ClusterId}.dsql.${AWS::Region}.on.aws"
+          DATA_BUCKET: !Ref Bucket
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref BucketName
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
+
+Outputs:
+  S3BucketName:
+    Description: "S3 Bucket Name"
+    Value: !Ref Bucket
