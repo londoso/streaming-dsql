@@ -2,9 +2,11 @@ import json
 import os
 import psycopg2
 import boto3
+import schema
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from aws_lambda_powertools.utilities.streaming.s3_object import S3Object
+from aws_lambda_powertools.utilities.validation import validate, SchemaValidationError, envelopes
 
 logger = Logger()
 
@@ -58,10 +60,22 @@ def insert_data(key: str):
         """
 
     s3 = S3Object(bucket=data_bucket, key=key, is_csv=True)
-    
+
     for line in s3:
-        logger.info(line)
-        cursor.execute(query, line)
+        try:
+            validate(event=line, schema=schema.INPUT)
+            logger.info(line)
+            cursor.execute(query, line)
+        except SchemaValidationError as exception:
+            logger.exception(f"Data validation Failed. {exception}")
+            conn.close()
+            return {
+                "statusCode": 400,
+                "body": json.dumps({
+                    "message": "Error en la validación de datos",
+                }),
+            }
+        
 
     # Make the changes to the database persistent
     conn.commit()
@@ -69,6 +83,7 @@ def insert_data(key: str):
     cursor.close()
     # Close connection
     conn.close()
+    logger.info("Registros insertados en la base de datos")
     return {
         "statusCode": 200,
         "body": json.dumps({
@@ -79,4 +94,3 @@ def insert_data(key: str):
 @logger.inject_lambda_context(log_event=True)
 def lambda_handler(event: dict, context: LambdaContext) -> dict:
     insert_data(event["detail"]["object"]["key"])
-
